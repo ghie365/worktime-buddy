@@ -1,46 +1,69 @@
-// ===== WorkTime Buddy — App Logic =====
+// ===== WorkTime Buddy — Complete Logic & Settings Engine =====
 
-// --- State ---
+// Default Settings
+const DEFAULT_SETTINGS = {
+  job1: {
+    name: 'Sr. Sysadmin',
+    type: 'monthly', // 'monthly' | 'hourly'
+    currency: 'IDR',
+    rate: 15000000,
+  },
+  job2: {
+    name: 'L3 Linux Engineer',
+    type: 'hourly',  // 'hourly' | 'monthly'
+    currency: 'USD',
+    rate: 45,
+  },
+  exchangeRate: 15800,
+  primaryTz: 'America/New_York',
+  shiftStart: '09:00',
+  shiftEnd: '17:00',
+};
+
+// Application State
 let state = {
-  currentJob: 'sysadmin',
+  currentJob: 'job1',
   timer: {
     running: false,
     paused: false,
     jobId: null,
     startTime: null,
     pauseTime: null,
-    elapsed: 0, // ms accumulated before current run segment
+    elapsed: 0,
   },
   selectedMonth: new Date().getMonth(),
   selectedYear: new Date().getFullYear(),
+  modalAction: null,
   deleteTarget: null,
 };
 
-// --- Constants ---
-const JOBS = {
-  sysadmin: { name: 'Sr. Sysadmin', color: 'job1' },
-  l3engineer: { name: 'L3 Engineer', color: 'job2' },
-};
-
 const TIMEZONES = [
-  { id: 'jakarta', tz: 'Asia/Jakarta', city: 'Jakarta', flag: '🇮🇩', label: 'WIB', elId: 'clock-jakarta' },
-  { id: 'newyork', tz: 'America/New_York', city: 'New York', flag: '🇺🇸', label: 'ET', elId: 'clock-newyork' },
-  { id: 'chicago', tz: 'America/Chicago', city: 'Chicago', flag: '🇺🇸', label: 'CT', elId: 'clock-chicago' },
-  { id: 'denver', tz: 'America/Denver', city: 'Denver', flag: '🇺🇸', label: 'MT', elId: 'clock-denver' },
-  { id: 'la', tz: 'America/Los_Angeles', city: 'Los Angeles', flag: '🇺🇸', label: 'PT', elId: 'clock-la' },
+  { id: 'jakarta', tz: 'Asia/Jakarta', city: 'Jakarta', sub: 'WIB · Your Time', flag: '🇮🇩' },
+  { id: 'newyork', tz: 'America/New_York', city: 'New York', sub: 'ET · Eastern', flag: '🇺🇸' },
+  { id: 'chicago', tz: 'America/Chicago', city: 'Chicago', sub: 'CT · Central', flag: '🇺🇸' },
+  { id: 'denver', tz: 'America/Denver', city: 'Denver', sub: 'MT · Mountain', flag: '🇺🇸' },
+  { id: 'la', tz: 'America/Los_Angeles', city: 'Los Angeles', sub: 'PT · Pacific', flag: '🇺🇸' },
 ];
 
-const TZ_LABELS = {
+const TZ_SHORT_NAMES = {
   'America/New_York': 'US East (ET)',
   'America/Chicago': 'US Central (CT)',
   'America/Denver': 'US Mountain (MT)',
   'America/Los_Angeles': 'US West (PT)',
 };
 
-// --- Storage ---
+// --- Storage Handlers ---
 function loadSessions() {
-  try { return JSON.parse(localStorage.getItem('wtb_sessions') || '[]'); }
-  catch { return []; }
+  try {
+    const raw = JSON.parse(localStorage.getItem('wtb_sessions') || '[]');
+    // Normalize older jobId 'sysadmin' -> 'job1', 'l3engineer' -> 'job2'
+    return raw.map(s => ({
+      ...s,
+      jobId: s.jobId === 'sysadmin' ? 'job1' : (s.jobId === 'l3engineer' ? 'job2' : s.jobId),
+    }));
+  } catch {
+    return [];
+  }
 }
 
 function saveSessions(sessions) {
@@ -48,10 +71,25 @@ function saveSessions(sessions) {
 }
 
 function loadSettings() {
-  const defaults = { salary: 0, rate: 0, exchange: 15800, primaryTz: 'America/New_York' };
   try {
-    return { ...defaults, ...JSON.parse(localStorage.getItem('wtb_settings') || '{}') };
-  } catch { return defaults; }
+    const saved = JSON.parse(localStorage.getItem('wtb_settings') || '{}');
+    // Backward compatibility with older schema
+    const settings = { ...DEFAULT_SETTINGS, ...saved };
+    if (saved.salary !== undefined) {
+      settings.job1.rate = saved.salary;
+      settings.job1.type = 'monthly';
+    }
+    if (saved.rate !== undefined) {
+      settings.job2.rate = saved.rate;
+      settings.job2.type = 'hourly';
+    }
+    if (saved.exchange !== undefined) {
+      settings.exchangeRate = saved.exchange;
+    }
+    return settings;
+  } catch {
+    return DEFAULT_SETTINGS;
+  }
 }
 
 function saveSettingsData(settings) {
@@ -67,87 +105,126 @@ function saveTimerState() {
   localStorage.setItem('wtb_timer', JSON.stringify(state.timer));
 }
 
-// --- Init ---
+// --- Initialization ---
 function init() {
-  // Restore timer
-  const saved = loadTimerState();
-  if (saved && saved.running) {
-    state.timer = saved;
-    state.currentJob = saved.jobId;
+  // Restore timer if active
+  const savedTimer = loadTimerState();
+  if (savedTimer && savedTimer.running) {
+    state.timer = savedTimer;
+    state.currentJob = savedTimer.jobId || 'job1';
   }
 
-  // Restore settings to form
-  const settings = loadSettings();
-  document.getElementById('set-salary').value = settings.salary || '';
-  document.getElementById('set-rate').value = settings.rate || '';
-  document.getElementById('set-exchange').value = settings.exchange || '';
-  document.getElementById('set-primary-tz').value = settings.primaryTz;
+  // Populate settings form
+  populateSettingsUI();
 
-  // Set manual date default
-  document.getElementById('manual-date').value = todayStr();
+  // Set today's date in manual modal
+  const manualDateInput = document.getElementById('manual-date');
+  if (manualDateInput) manualDateInput.value = todayStr();
 
-  // Start ticking
+  // Start clock loop
   tick();
   setInterval(tick, 1000);
 
-  // Build overlap timeline
+  // Render timeline & meeting planner
   buildOverlapTimeline();
-
-  // Initial update meeting planner
   updateMeetingTime();
 
-  // Render everything
+  // Render all pages
   renderAll();
 }
 
-// --- Page Switching ---
+// --- Navigation ---
 function switchPage(page) {
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
-  document.getElementById('page-' + page).classList.add('active');
+  const target = document.getElementById('page-' + page);
+  if (target) target.classList.add('active');
+
   document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
-  document.querySelector(`.nav-btn[data-page="${page}"]`).classList.add('active');
+  const activeBtn = document.querySelector(`.nav-btn[data-page="${page}"]`);
+  if (activeBtn) activeBtn.classList.add('active');
+
+  // Trigger re-render when switching to views with dynamic states
+  if (page === 'earnings' || page === 'dashboard' || page === 'timezones') {
+    renderAll();
+  }
 }
 
-// --- Clock Tick ---
+// --- Live Clock & Timezone Loop ---
 function tick() {
   const now = new Date();
+  const settings = loadSettings();
 
-  // Update all clocks
+  // Update Clocks in Timezones Tab
   TIMEZONES.forEach(tz => {
-    const timeEl = document.getElementById(tz.elId);
-    const dateEl = document.getElementById(tz.elId + '-date');
-    const diffEl = document.getElementById(tz.elId + '-diff');
+    const timeEl = document.getElementById(`clock-${tz.id}`);
+    const dateEl = document.getElementById(`clock-${tz.id}-date`);
+    const diffEl = document.getElementById(`clock-${tz.id}-diff`);
+    const statusEl = document.getElementById(`clock-${tz.id}-status`);
 
-    const timeStr = now.toLocaleTimeString('en-US', { timeZone: tz.tz, hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
-    const dateStr = now.toLocaleDateString('en-US', { timeZone: tz.tz, weekday: 'short', month: 'short', day: 'numeric' });
+    if (timeEl) {
+      timeEl.textContent = now.toLocaleTimeString('en-US', {
+        timeZone: tz.tz,
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false,
+      });
+    }
 
-    if (timeEl) timeEl.textContent = timeStr;
-    if (dateEl) dateEl.textContent = dateStr;
+    if (dateEl) {
+      dateEl.textContent = now.toLocaleDateString('en-US', {
+        timeZone: tz.tz,
+        weekday: 'short',
+        month: 'short',
+        day: 'numeric',
+      });
+    }
 
-    if (diffEl) {
+    // Offset difference from Jakarta
+    if (diffEl && tz.id !== 'jakarta') {
       const jakartaOffset = getTimezoneOffset('Asia/Jakarta', now);
       const tzOffset = getTimezoneOffset(tz.tz, now);
       const diffHours = (jakartaOffset - tzOffset) / 60;
       diffEl.textContent = diffHours > 0 ? `-${diffHours}h` : `+${Math.abs(diffHours)}h`;
     }
+
+    // Status pill (Working / Wrap-up / Off)
+    if (statusEl) {
+      const localHour = parseInt(now.toLocaleTimeString('en-US', { timeZone: tz.tz, hour: '2-digit', hour12: false }));
+      if (localHour >= 9 && localHour < 17) {
+        statusEl.className = 'clock-status-pill green';
+        statusEl.textContent = '🟢 Working';
+      } else if ((localHour >= 7 && localHour < 9) || (localHour >= 17 && localHour < 19)) {
+        statusEl.className = 'clock-status-pill yellow';
+        statusEl.textContent = '🟡 Available';
+      } else {
+        statusEl.className = 'clock-status-pill gray';
+        statusEl.textContent = '😴 Off hours';
+      }
+    }
   });
 
-  // Header timezone
-  const settings = loadSettings();
-  const primaryTz = settings.primaryTz;
+  // Header quick clocks
+  const primaryTz = settings.primaryTz || 'America/New_York';
   const jakartaTime = now.toLocaleTimeString('en-US', { timeZone: 'Asia/Jakarta', hour: '2-digit', minute: '2-digit', hour12: true });
   const usTime = now.toLocaleTimeString('en-US', { timeZone: primaryTz, hour: '2-digit', minute: '2-digit', hour12: true });
-  document.getElementById('header-tz').innerHTML = `🇮🇩 ${jakartaTime} · 🇺🇸 ${usTime}`;
+  const headerTzEl = document.getElementById('header-tz');
+  if (headerTzEl) {
+    headerTzEl.innerHTML = `🇮🇩 ${jakartaTime}<br>🇺🇸 ${usTime}`;
+  }
 
-  // Dashboard tz strip
-  document.getElementById('tz-local-time').textContent = now.toLocaleTimeString('en-US', { timeZone: 'Asia/Jakarta', hour: '2-digit', minute: '2-digit', hour12: true });
-  document.getElementById('tz-us-time').textContent = now.toLocaleTimeString('en-US', { timeZone: primaryTz, hour: '2-digit', minute: '2-digit', hour12: true });
-  document.getElementById('tz-us-label').textContent = TZ_LABELS[primaryTz] || 'US';
+  // Dashboard strip
+  const dashLocal = document.getElementById('tz-local-time');
+  const dashUs = document.getElementById('tz-us-time');
+  const dashUsLabel = document.getElementById('tz-us-label');
+  if (dashLocal) dashLocal.textContent = jakartaTime;
+  if (dashUs) dashUs.textContent = usTime;
+  if (dashUsLabel) dashUsLabel.textContent = TZ_SHORT_NAMES[primaryTz] || 'US Team';
 
-  // Overlap indicator
-  updateOverlapIndicator(now, primaryTz);
+  // Dashboard overlap indicator
+  updateDashboardOverlapBanner(now, primaryTz);
 
-  // Update timer display
+  // Active Timer display tick
   if (state.timer.running && !state.timer.paused) {
     updateTimerDisplay();
   }
@@ -159,42 +236,171 @@ function getTimezoneOffset(tz, date) {
   return (tzDate - utcDate) / 60000;
 }
 
-function updateOverlapIndicator(now, usTz) {
+function updateDashboardOverlapBanner(now, usTz) {
   const usHour = parseInt(now.toLocaleTimeString('en-US', { timeZone: usTz, hour: '2-digit', hour12: false }));
   const card = document.getElementById('overlap-card');
   const icon = document.getElementById('overlap-icon');
   const text = document.getElementById('overlap-text');
+  if (!card) return;
 
   card.className = 'overlap-card';
 
   if (usHour >= 9 && usHour < 17) {
     icon.textContent = '🟢';
-    text.textContent = 'US team is in working hours — good time to sync!';
-  } else if (usHour >= 7 && usHour < 9) {
+    text.textContent = 'US team is in working hours — great time for sync!';
+  } else if ((usHour >= 7 && usHour < 9) || (usHour >= 17 && usHour < 20)) {
     icon.textContent = '🟡';
-    text.textContent = 'US team starting soon — they may be available.';
-    card.classList.add('warning');
-  } else if (usHour >= 17 && usHour < 20) {
-    icon.textContent = '🟡';
-    text.textContent = 'US team wrapping up — catch them before they leave.';
+    text.textContent = 'US team wrapping up / starting up soon';
     card.classList.add('warning');
   } else {
     icon.textContent = '🔴';
-    text.textContent = 'US team is off hours — async communication recommended.';
+    text.textContent = 'US team off hours — async messaging recommended';
     card.classList.add('danger');
   }
 }
 
-// --- Timer ---
+// --- Overlap Timeline Visualizer ---
+function buildOverlapTimeline() {
+  const settings = loadSettings();
+  const [shiftStartH] = (settings.shiftStart || '09:00').split(':').map(Number);
+  const [shiftEndH] = (settings.shiftEnd || '17:00').split(':').map(Number);
+
+  // US working hours: 09:00 - 17:00 in primary US zone
+  // Convert US 9AM to WIB (approx 21:00 or 22:00)
+  const now = new Date();
+  const jakartaOffset = getTimezoneOffset('Asia/Jakarta', now);
+  const usOffset = getTimezoneOffset(settings.primaryTz, now);
+  const diffHours = Math.round((jakartaOffset - usOffset) / 60);
+
+  // US 9AM in WIB = (9 + diffHours) % 24
+  const usStartInWIB = (9 + diffHours + 24) % 24;
+  const usEndInWIB = (17 + diffHours + 24) % 24;
+
+  const barYours = document.getElementById('bar-yours');
+  const barTheirs = document.getElementById('bar-theirs');
+  const barOverlap = document.getElementById('bar-overlap');
+  const usLabel = document.getElementById('timeline-us-label');
+  const syncWindowText = document.getElementById('sync-window-text');
+
+  if (usLabel) usLabel.textContent = `🇺🇸 ${TZ_SHORT_NAMES[settings.primaryTz] || 'US Team'}`;
+
+  function isYourHour(h) {
+    return h >= shiftStartH && h < shiftEndH;
+  }
+
+  function isUsHourInWIB(h) {
+    if (usStartInWIB < usEndInWIB) {
+      return h >= usStartInWIB && h < usEndInWIB;
+    }
+    return h >= usStartInWIB || h < usEndInWIB;
+  }
+
+  let yoursHtml = '';
+  let theirsHtml = '';
+  let overlapHtml = '';
+
+  let overlapHours = [];
+
+  for (let h = 0; h < 24; h++) {
+    const yActive = isYourHour(h);
+    const tActive = isUsHourInWIB(h);
+    const oActive = yActive && tActive;
+
+    if (oActive) overlapHours.push(h);
+
+    yoursHtml += `<div class="timeline-hour-cell ${yActive ? 'yours' : 'off'}"></div>`;
+    theirsHtml += `<div class="timeline-hour-cell ${tActive ? 'theirs' : 'off'}"></div>`;
+    overlapHtml += `<div class="timeline-hour-cell ${oActive ? 'overlap' : 'off'}"></div>`;
+  }
+
+  if (barYours) barYours.innerHTML = yoursHtml;
+  if (barTheirs) barTheirs.innerHTML = theirsHtml;
+  if (barOverlap) barOverlap.innerHTML = overlapHtml;
+
+  // Update optimal sync banner
+  if (syncWindowText) {
+    if (overlapHours.length > 0) {
+      const startH = overlapHours[0];
+      const endH = overlapHours[overlapHours.length - 1] + 1;
+      syncWindowText.textContent = `${formatHour(startH)} – ${formatHour(endH)} WIB (${overlapHours.length} hours mutual overlap)`;
+    } else {
+      // Suggest closest evening sync window
+      const usMorningInWIB = usStartInWIB;
+      syncWindowText.textContent = `${formatHour(usMorningInWIB)} – ${formatHour((usMorningInWIB + 2) % 24)} WIB (US morning start)`;
+    }
+  }
+}
+
+function formatHour(h) {
+  const pad = h.toString().padStart(2, '0');
+  return `${pad}:00`;
+}
+
+// --- Meeting Planner ---
+function updateMeetingTime() {
+  const timeInput = document.getElementById('meeting-time');
+  if (!timeInput || !timeInput.value) return;
+
+  const [hours, minutes] = timeInput.value.split(':').map(Number);
+  const now = new Date();
+  const jakartaDate = new Date(now);
+  jakartaDate.setHours(hours, minutes, 0, 0);
+
+  const container = document.getElementById('meeting-results');
+  if (!container) return;
+
+  const usTzs = TIMEZONES.filter(tz => tz.id !== 'jakarta');
+
+  container.innerHTML = usTzs.map(tz => {
+    const timeStr = jakartaDate.toLocaleTimeString('en-US', {
+      timeZone: tz.tz,
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: true,
+    });
+
+    const usHour = parseInt(jakartaDate.toLocaleTimeString('en-US', {
+      timeZone: tz.tz,
+      hour: '2-digit',
+      hour12: false,
+    }));
+
+    let status, statusColor;
+    if (usHour >= 9 && usHour < 17) {
+      status = '✅ Working hours';
+      statusColor = 'var(--success)';
+    } else if ((usHour >= 7 && usHour < 9) || (usHour >= 17 && usHour < 20)) {
+      status = '⚠️ Maybe available';
+      statusColor = 'var(--warning)';
+    } else {
+      status = '😴 Off hours';
+      statusColor = 'var(--danger)';
+    }
+
+    return `
+      <div class="meeting-result-row">
+        <span class="meeting-result-city">${tz.flag} ${tz.city} (${tz.sub.split('·')[0].trim()})</span>
+        <span class="meeting-result-time">${timeStr}</span>
+        <span class="meeting-result-status" style="color:${statusColor}">${status}</span>
+      </div>
+    `;
+  }).join('');
+}
+
+// --- Timer System ---
 function selectJob(jobId) {
   if (state.timer.running) {
-    showToast('Stop the timer before switching jobs');
+    showToast('Stop timer before switching jobs');
     return;
   }
   state.currentJob = jobId;
-  document.getElementById('toggle-sysadmin').classList.toggle('active', jobId === 'sysadmin');
-  document.getElementById('toggle-l3engineer').classList.toggle('active', jobId === 'l3engineer');
-  document.getElementById('timer-job').textContent = JOBS[jobId].name;
+  const settings = loadSettings();
+  const jobConfig = settings[jobId] || { name: 'Job' };
+
+  document.getElementById('toggle-job1')?.classList.toggle('active', jobId === 'job1');
+  document.getElementById('toggle-job2')?.classList.toggle('active', jobId === 'job2');
+  const timerJobEl = document.getElementById('timer-job');
+  if (timerJobEl) timerJobEl.textContent = jobConfig.name;
 }
 
 function startTimer() {
@@ -208,7 +414,8 @@ function startTimer() {
   };
   saveTimerState();
   updateTimerUI();
-  showToast(`Timer started — ${JOBS[state.currentJob].name}`);
+  const settings = loadSettings();
+  showToast(`Timer started — ${settings[state.currentJob]?.name || 'Job'}`);
 }
 
 function pauseTimer() {
@@ -242,9 +449,10 @@ function stopTimer() {
     return;
   }
 
-  // Save session
   const sessions = loadSessions();
   const sessionStart = new Date(Date.now() - totalMs);
+  const settings = loadSettings();
+
   sessions.push({
     id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
     jobId: state.timer.jobId,
@@ -256,7 +464,7 @@ function stopTimer() {
   });
   saveSessions(sessions);
 
-  showToast(`Saved: ${formatDuration(durationMin)} for ${JOBS[state.timer.jobId].name}`);
+  showToast(`Logged: ${formatDuration(durationMin)} for ${settings[state.timer.jobId]?.name || 'Job'}`);
   resetTimer();
   renderAll();
 }
@@ -278,8 +486,10 @@ function updateTimerDisplay() {
   const m = Math.floor((totalSec % 3600) / 60);
   const s = totalSec % 60;
 
-  document.getElementById('timer-time').textContent =
-    `${h.toString().padStart(2,'0')}:${m.toString().padStart(2,'0')}:${s.toString().padStart(2,'0')}`;
+  const timeEl = document.getElementById('timer-time');
+  if (timeEl) {
+    timeEl.textContent = `${h.toString().padStart(2,'0')}:${m.toString().padStart(2,'0')}:${s.toString().padStart(2,'0')}`;
+  }
 }
 
 function updateTimerUI() {
@@ -290,53 +500,49 @@ function updateTimerUI() {
   const btnResume = document.getElementById('btn-resume');
   const btnStop = document.getElementById('btn-stop');
   const timerStarted = document.getElementById('timer-started');
+  if (!display) return;
 
   display.className = 'timer-display';
 
   if (running && !paused) {
     display.classList.add('running');
-    if (jobId === 'l3engineer') display.classList.add('job2-active');
-    btnStart.classList.add('hidden');
-    btnPause.classList.remove('hidden');
-    btnResume.classList.add('hidden');
-    btnStop.classList.remove('hidden');
+    if (jobId === 'job2') display.classList.add('job2-active');
+    btnStart?.classList.add('hidden');
+    btnPause?.classList.remove('hidden');
+    btnResume?.classList.add('hidden');
+    btnStop?.classList.remove('hidden');
     const startDate = new Date(state.timer.startTime - state.timer.elapsed);
-    timerStarted.textContent = `Started at ${startDate.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true })}`;
+    if (timerStarted) timerStarted.textContent = `Started at ${startDate.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true })}`;
   } else if (running && paused) {
     display.classList.add('paused');
-    btnStart.classList.add('hidden');
-    btnPause.classList.add('hidden');
-    btnResume.classList.remove('hidden');
-    btnStop.classList.remove('hidden');
-    timerStarted.textContent = 'Paused';
+    btnStart?.classList.add('hidden');
+    btnPause?.classList.add('hidden');
+    btnResume?.classList.remove('hidden');
+    btnStop?.classList.remove('hidden');
+    if (timerStarted) timerStarted.textContent = 'Paused';
   } else {
-    btnStart.classList.remove('hidden');
-    btnPause.classList.add('hidden');
-    btnResume.classList.add('hidden');
-    btnStop.classList.add('hidden');
-    document.getElementById('timer-time').textContent = '00:00:00';
-    timerStarted.textContent = '';
+    btnStart?.classList.remove('hidden');
+    btnPause?.classList.add('hidden');
+    btnResume?.classList.add('hidden');
+    btnStop?.classList.add('hidden');
+    const timeEl = document.getElementById('timer-time');
+    if (timeEl) timeEl.textContent = '00:00:00';
+    if (timerStarted) timerStarted.textContent = '';
   }
 
-  // Update dashboard quick buttons
   updateDashQuickButtons();
-
-  // Update timer job label
-  document.getElementById('timer-job').textContent = JOBS[state.currentJob]?.name || 'Select a job';
-
-  // Persist selected job toggles
-  document.getElementById('toggle-sysadmin').classList.toggle('active', state.currentJob === 'sysadmin');
-  document.getElementById('toggle-l3engineer').classList.toggle('active', state.currentJob === 'l3engineer');
 }
 
 function updateDashQuickButtons() {
-  const { running, paused, jobId } = state.timer;
+  const { running, jobId } = state.timer;
 
-  ['sysadmin', 'l3engineer'].forEach(jid => {
-    const num = jid === 'sysadmin' ? '1' : '2';
+  ['job1', 'job2'].forEach(jid => {
+    const num = jid === 'job1' ? '1' : '2';
     const btnIcon = document.getElementById(`dash-job${num}-btn-icon`);
     const btnText = document.getElementById(`dash-job${num}-btn-text`);
-    const btn = btnIcon.closest('.quick-start-btn');
+    const btn = btnIcon?.closest('.quick-start-btn');
+
+    if (!btnIcon || !btnText || !btn) return;
 
     if (running && jobId === jid) {
       btnIcon.textContent = '⏹';
@@ -356,16 +562,16 @@ function quickStart(jobId) {
     return;
   }
   if (state.timer.running) {
-    showToast('Stop current timer first');
+    showToast('Stop current active timer first');
     return;
   }
   state.currentJob = jobId;
   startTimer();
 }
 
-// --- Manual Entry ---
+// --- Manual Entry Form ---
 function toggleManualEntry() {
-  document.getElementById('manual-entry').classList.toggle('hidden');
+  document.getElementById('manual-entry')?.classList.toggle('hidden');
 }
 
 function saveManualEntry() {
@@ -376,13 +582,13 @@ function saveManualEntry() {
   const note = document.getElementById('manual-note').value.trim();
 
   if (!date || !start || !end) {
-    showToast('Please fill in date, start and end time');
+    showToast('Please specify date, start & end time');
     return;
   }
 
   const startMin = timeToMinutes(start);
   let endMin = timeToMinutes(end);
-  if (endMin <= startMin) endMin += 1440; // overnight
+  if (endMin <= startMin) endMin += 1440; // Over midnight
   const durationMin = endMin - startMin;
 
   if (durationMin < 1) {
@@ -402,120 +608,290 @@ function saveManualEntry() {
   });
   saveSessions(sessions);
 
-  // Reset form
-  document.getElementById('manual-note').value = '';
-  document.getElementById('manual-entry').classList.add('hidden');
+  const noteInput = document.getElementById('manual-note');
+  if (noteInput) noteInput.value = '';
+  document.getElementById('manual-entry')?.classList.add('hidden');
 
-  showToast(`Added ${formatDuration(durationMin)} for ${JOBS[jobId].name}`);
+  const settings = loadSettings();
+  showToast(`Added ${formatDuration(durationMin)} for ${settings[jobId]?.name || 'Job'}`);
   renderAll();
 }
 
-// --- Delete Session ---
+// --- Delete & Modal System ---
 function deleteSession(id) {
+  state.modalAction = 'deleteSession';
   state.deleteTarget = id;
-  document.getElementById('modal-overlay').classList.remove('hidden');
+  const modal = document.getElementById('modal-overlay');
+  document.getElementById('modal-title').textContent = 'Delete Session?';
+  document.getElementById('modal-text').textContent = 'This entry will be permanently removed.';
+  modal?.classList.remove('hidden');
 }
 
-function confirmDelete() {
-  if (state.deleteTarget) {
+function confirmResetAll() {
+  state.modalAction = 'resetAll';
+  const modal = document.getElementById('modal-overlay');
+  document.getElementById('modal-title').textContent = 'Clear All Sessions?';
+  document.getElementById('modal-text').textContent = 'All tracked work logs will be erased. Settings will be kept.';
+  modal?.classList.remove('hidden');
+}
+
+function confirmModalAction() {
+  if (state.modalAction === 'deleteSession' && state.deleteTarget) {
     let sessions = loadSessions();
     sessions = sessions.filter(s => s.id !== state.deleteTarget);
     saveSessions(sessions);
-    state.deleteTarget = null;
-    closeModal();
-    renderAll();
     showToast('Session deleted');
+  } else if (state.modalAction === 'resetAll') {
+    saveSessions([]);
+    showToast('All sessions cleared');
   }
+  closeModal();
+  renderAll();
 }
 
 function closeModal() {
-  document.getElementById('modal-overlay').classList.add('hidden');
+  document.getElementById('modal-overlay')?.classList.add('hidden');
   state.deleteTarget = null;
+  state.modalAction = null;
 }
 
-// --- Settings ---
-function saveSettings() {
-  const settings = loadSettings();
-  settings.salary = parseFloat(document.getElementById('set-salary').value) || 0;
-  settings.rate = parseFloat(document.getElementById('set-rate').value) || 0;
-  settings.exchange = parseFloat(document.getElementById('set-exchange').value) || 15800;
-  saveSettingsData(settings);
+// --- Dynamic Settings UI Handlers ---
+function populateSettingsUI() {
+  const s = loadSettings();
+
+  // Job 1
+  setValue('set-j1-name', s.job1.name);
+  setValue('set-j1-curr', s.job1.currency);
+  setValue('set-j1-rate', s.job1.rate);
+  setJobPayTypeUI('job1', s.job1.type);
+
+  // Job 2
+  setValue('set-j2-name', s.job2.name);
+  setValue('set-j2-curr', s.job2.currency);
+  setValue('set-j2-rate', s.job2.rate);
+  setJobPayTypeUI('job2', s.job2.type);
+
+  // Exchange rate & timezones
+  setValue('set-exchange', s.exchangeRate);
+  setValue('set-primary-tz', s.primaryTz);
+  setValue('set-shift-start', s.shiftStart);
+  setValue('set-shift-end', s.shiftEnd);
+}
+
+function setValue(id, val) {
+  const el = document.getElementById(id);
+  if (el && val !== undefined) el.value = val;
+}
+
+function setJobPayType(jobId, type) {
+  const s = loadSettings();
+  s[jobId].type = type;
+  saveSettingsData(s);
+  setJobPayTypeUI(jobId, type);
   renderAll();
-  showToast('Settings saved');
 }
 
-function savePrimaryTz() {
-  const settings = loadSettings();
-  settings.primaryTz = document.getElementById('set-primary-tz').value;
-  saveSettingsData(settings);
+function setJobPayTypeUI(jobId, type) {
+  const isMonthly = type === 'monthly';
+  const btnMonthly = document.getElementById(`seg-${jobId === 'job1' ? 'j1' : 'j2'}-monthly`);
+  const btnHourly = document.getElementById(`seg-${jobId === 'job1' ? 'j1' : 'j2'}-hourly`);
+  const lblRate = document.getElementById(`lbl-${jobId === 'job1' ? 'j1' : 'j2'}-rate`);
+
+  if (btnMonthly) btnMonthly.className = `seg-btn ${isMonthly ? 'active' : ''}`;
+  if (btnHourly) btnHourly.className = `seg-btn ${!isMonthly ? 'active' : ''}`;
+
+  if (lblRate) {
+    lblRate.textContent = isMonthly ? 'Monthly Salary Amount' : 'Hourly Rate Amount';
+  }
 }
 
-// --- Render ---
+function saveAllSettings() {
+  const s = loadSettings();
+
+  // Job 1
+  s.job1.name = document.getElementById('set-j1-name')?.value.trim() || 'Job 1';
+  s.job1.currency = document.getElementById('set-j1-curr')?.value || 'IDR';
+  s.job1.rate = parseFloat(document.getElementById('set-j1-rate')?.value) || 0;
+
+  // Job 2
+  s.job2.name = document.getElementById('set-j2-name')?.value.trim() || 'Job 2';
+  s.job2.currency = document.getElementById('set-j2-curr')?.value || 'USD';
+  s.job2.rate = parseFloat(document.getElementById('set-j2-rate')?.value) || 0;
+
+  // Global settings
+  s.exchangeRate = parseFloat(document.getElementById('set-exchange')?.value) || 15800;
+  s.primaryTz = document.getElementById('set-primary-tz')?.value || 'America/New_York';
+  s.shiftStart = document.getElementById('set-shift-start')?.value || '09:00';
+  s.shiftEnd = document.getElementById('set-shift-end')?.value || '17:00';
+
+  saveSettingsData(s);
+  buildOverlapTimeline();
+  updateMeetingTime();
+  renderAll();
+  showToast('Settings updated');
+}
+
+// --- Data Export ---
+function exportData() {
+  const data = {
+    settings: loadSettings(),
+    sessions: loadSessions(),
+    exportDate: new Date().toISOString(),
+  };
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `worktime-buddy-backup-${todayStr()}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+  showToast('Data exported');
+}
+
+// --- Comprehensive Render Engine ---
 function renderAll() {
   const sessions = loadSessions();
   const settings = loadSettings();
   const today = todayStr();
 
-  // --- Dashboard ---
+  // Update dynamic job names across UI
+  updateJobNamesUI(settings);
+
+  // Filter Today Sessions
   const todaySessions = sessions.filter(s => s.date === today);
-  const job1Mins = todaySessions.filter(s => s.jobId === 'sysadmin').reduce((sum, s) => sum + s.durationMin, 0);
-  const job2Mins = todaySessions.filter(s => s.jobId === 'l3engineer').reduce((sum, s) => sum + s.durationMin, 0);
+  const j1TodayMins = todaySessions.filter(s => s.jobId === 'job1').reduce((sum, s) => sum + s.durationMin, 0);
+  const j2TodayMins = todaySessions.filter(s => s.jobId === 'job2').reduce((sum, s) => sum + s.durationMin, 0);
 
-  document.getElementById('dash-job1-hours').textContent = formatDuration(job1Mins);
-  document.getElementById('dash-job2-hours').textContent = formatDuration(job2Mins);
+  setText('dash-job1-hours', formatDuration(j1TodayMins));
+  setText('dash-job2-hours', formatDuration(j2TodayMins));
 
-  // This month earnings
-  const thisMonth = new Date().getMonth();
-  const thisYear = new Date().getFullYear();
+  // Monthly Calculations
+  const month = state.selectedMonth;
+  const year = state.selectedYear;
   const monthSessions = sessions.filter(s => {
     const d = new Date(s.date);
-    return d.getMonth() === thisMonth && d.getFullYear() === thisYear;
+    return d.getMonth() === month && d.getFullYear() === year;
   });
 
-  const job1MonthMins = monthSessions.filter(s => s.jobId === 'sysadmin').reduce((sum, s) => sum + s.durationMin, 0);
-  const job2MonthMins = monthSessions.filter(s => s.jobId === 'l3engineer').reduce((sum, s) => sum + s.durationMin, 0);
-  const job2EarningsUsd = (job2MonthMins / 60) * settings.rate;
-  const job2EarningsIdr = job2EarningsUsd * settings.exchange;
-  const totalIdr = settings.salary + job2EarningsIdr;
+  const j1MonthMins = monthSessions.filter(s => s.jobId === 'job1').reduce((sum, s) => sum + s.durationMin, 0);
+  const j2MonthMins = monthSessions.filter(s => s.jobId === 'job2').reduce((sum, s) => sum + s.durationMin, 0);
 
-  document.getElementById('dash-job1-earning').textContent = formatIDR(settings.salary);
-  document.getElementById('dash-job2-earning').textContent = formatUSD(job2EarningsUsd);
-  document.getElementById('dash-total-earning').textContent = formatIDR(totalIdr);
+  // Dynamic Earnings for Job 1
+  let j1Earned = 0;
+  if (settings.job1.type === 'monthly') {
+    j1Earned = settings.job1.rate;
+  } else {
+    j1Earned = (j1MonthMins / 60) * settings.job1.rate;
+  }
 
-  // Recent sessions (last 5)
+  // Dynamic Earnings for Job 2
+  let j2Earned = 0;
+  if (settings.job2.type === 'monthly') {
+    j2Earned = settings.job2.rate;
+  } else {
+    j2Earned = (j2MonthMins / 60) * settings.job2.rate;
+  }
+
+  // Currency Normalization to IDR & USD
+  const exchange = settings.exchangeRate || 15800;
+
+  const j1InIDR = settings.job1.currency === 'USD' ? j1Earned * exchange : j1Earned;
+  const j2InIDR = settings.job2.currency === 'USD' ? j2Earned * exchange : j2Earned;
+  const totalIDR = j1InIDR + j2InIDR;
+  const totalUSD = totalIDR / exchange;
+
+  // Format strings
+  const j1Formatted = settings.job1.currency === 'USD' ? formatUSD(j1Earned) : formatIDR(j1Earned);
+  const j2Formatted = settings.job2.currency === 'USD' ? formatUSD(j2Earned) : formatIDR(j2Earned);
+
+  // Dashboard preview
+  setText('dash-job1-earning', j1Formatted);
+  setText('dash-job2-earning', j2Formatted);
+  setText('dash-total-earning', formatIDR(totalIDR));
+
+  // Recent Sessions (last 5)
   const recent = [...sessions].sort((a, b) => {
-    const da = new Date(a.date + 'T' + a.startTime);
-    const db = new Date(b.date + 'T' + b.startTime);
-    return db - da;
+    return (b.date + 'T' + b.startTime).localeCompare(a.date + 'T' + a.startTime);
   }).slice(0, 5);
-  renderSessionsList('dash-recent-sessions', recent, true);
+  renderSessionsList('dash-recent-sessions', recent, true, settings);
 
-  // --- Timer page sessions ---
-  const timerSessions = todaySessions.sort((a, b) => a.startTime.localeCompare(b.startTime));
-  renderSessionsList('timer-sessions', timerSessions, false);
+  // Timer Tab sessions
+  renderSessionsList('timer-sessions', todaySessions, false, settings);
 
-  // --- Earnings ---
-  renderEarnings(sessions, settings);
+  // Earnings Tab Breakdown
+  renderEarningsTab(settings, j1Earned, j2Earned, j1MonthMins, j2MonthMins, totalIDR, totalUSD, monthSessions);
 
-  // Update timer UI
   updateTimerUI();
 }
 
-function renderSessionsList(containerId, sessions, showDate) {
+function updateJobNamesUI(settings) {
+  // Dashboard
+  setText('dash-job1-title', settings.job1.name);
+  setText('dash-job2-title', settings.job2.name);
+  setText('dash-job1-row-label', settings.job1.name);
+  setText('dash-job2-row-label', settings.job2.name);
+
+  // Timer
+  setText('timer-btn-job1-title', settings.job1.name);
+  setText('timer-btn-job2-title', settings.job2.name);
+  setText('timer-job', settings[state.currentJob]?.name || 'Job');
+  const opt1 = document.getElementById('manual-opt-job1');
+  const opt2 = document.getElementById('manual-opt-job2');
+  if (opt1) opt1.textContent = settings.job1.name;
+  if (opt2) opt2.textContent = settings.job2.name;
+
+  // Earnings breakdown headers
+  setText('earn-job1-title', settings.job1.name);
+  setText('earn-job2-title', settings.job2.name);
+}
+
+function renderEarningsTab(settings, j1Earned, j2Earned, j1Mins, j2Mins, totalIDR, totalUSD, monthSessions) {
+  const monthNames = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+  setText('earnings-month', `${monthNames[state.selectedMonth]} ${state.selectedYear}`);
+
+  setText('total-idr', formatIDR(totalIDR));
+  setText('total-usd', `≈ ${formatUSD(totalUSD)} USD`);
+
+  // Job 1
+  setText('earn-job1-type-badge', settings.job1.type.toUpperCase());
+  setText('earn-job1-rate-label', settings.job1.type === 'monthly' ? 'Monthly Salary' : 'Hourly Rate');
+  setText('earn-job1-rate-val', settings.job1.currency === 'USD' ? `$${settings.job1.rate}/hr` : formatIDR(settings.job1.rate));
+  setText('earn-job1-hours', formatDuration(j1Mins));
+  setText('earn-job1-total', settings.job1.currency === 'USD' ? formatUSD(j1Earned) : formatIDR(j1Earned));
+
+  // Job 2
+  setText('earn-job2-type-badge', settings.job2.type.toUpperCase());
+  setText('earn-job2-rate-label', settings.job2.type === 'monthly' ? 'Monthly Salary' : 'Hourly Rate');
+  setText('earn-job2-rate-val', settings.job2.currency === 'USD' ? `$${settings.job2.rate}/hr` : formatIDR(settings.job2.rate));
+  setText('earn-job2-hours', formatDuration(j2Mins));
+  setText('earn-job2-primary-total', settings.job2.currency === 'USD' ? formatUSD(j2Earned) : formatIDR(j2Earned));
+  setText('earn-job2-idr', formatIDR(settings.job2.currency === 'USD' ? j2Earned * settings.exchangeRate : j2Earned));
+
+  // Sessions list for earnings tab
+  const sorted = [...monthSessions].sort((a, b) => (b.date + 'T' + b.startTime).localeCompare(a.date + 'T' + a.startTime));
+  renderSessionsList('earn-sessions', sorted, true, settings);
+}
+
+function renderSessionsList(containerId, sessions, showDate, settings) {
   const container = document.getElementById(containerId);
+  if (!container) return;
+
   if (sessions.length === 0) {
-    container.innerHTML = '<div class="empty-state">No sessions yet</div>';
+    container.innerHTML = '<div class="empty-state">No sessions logged yet</div>';
     return;
   }
 
   container.innerHTML = sessions.map(s => {
-    const job = JOBS[s.jobId];
+    const isJob1 = s.jobId === 'job1';
+    const jobConfig = isJob1 ? settings.job1 : settings.job2;
+    const dotClass = isJob1 ? 'job1-dot' : 'job2-dot';
     const dateLabel = showDate ? `<span style="margin-left:4px;color:var(--text-muted)">${formatDate(s.date)}</span>` : '';
+
     return `
       <div class="session-item">
-        <div class="session-dot ${job.color}-dot" style="background:var(--${job.color})"></div>
+        <div class="session-dot ${dotClass}"></div>
         <div class="session-info">
-          <div class="session-job">${job.name}${dateLabel}</div>
+          <div class="session-job">${escapeHtml(jobConfig?.name || 'Job')}${dateLabel}</div>
           <div class="session-time">${s.startTime} → ${s.endTime}</div>
           ${s.note ? `<div class="session-note">${escapeHtml(s.note)}</div>` : ''}
         </div>
@@ -526,168 +902,16 @@ function renderSessionsList(containerId, sessions, showDate) {
   }).join('');
 }
 
-function renderEarnings(sessions, settings) {
-  const month = state.selectedMonth;
-  const year = state.selectedYear;
-
-  document.getElementById('earnings-month').textContent =
-    new Date(year, month).toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
-
-  const monthSessions = sessions.filter(s => {
-    const d = new Date(s.date);
-    return d.getMonth() === month && d.getFullYear() === year;
-  });
-
-  const job1Mins = monthSessions.filter(s => s.jobId === 'sysadmin').reduce((sum, s) => sum + s.durationMin, 0);
-  const job2Mins = monthSessions.filter(s => s.jobId === 'l3engineer').reduce((sum, s) => sum + s.durationMin, 0);
-
-  const job2Usd = (job2Mins / 60) * settings.rate;
-  const job2Idr = job2Usd * settings.exchange;
-  const totalIdr = settings.salary + job2Idr;
-  const totalUsd = totalIdr / (settings.exchange || 1);
-
-  document.getElementById('earn-job1-salary').textContent = formatIDR(settings.salary);
-  document.getElementById('earn-job1-hours').textContent = formatDuration(job1Mins);
-  document.getElementById('earn-job2-hours').textContent = formatDuration(job2Mins);
-  document.getElementById('earn-job2-rate').textContent = `$${settings.rate}/hr`;
-  document.getElementById('earn-job2-usd').textContent = formatUSD(job2Usd);
-  document.getElementById('earn-job2-idr').textContent = formatIDR(job2Idr);
-  document.getElementById('total-idr').textContent = formatIDR(totalIdr);
-  document.getElementById('total-usd').textContent = `≈ ${formatUSD(totalUsd)} USD`;
-
-  // Monthly sessions
-  const sorted = [...monthSessions].sort((a, b) => {
-    const da = new Date(a.date + 'T' + a.startTime);
-    const db = new Date(b.date + 'T' + b.startTime);
-    return db - da;
-  });
-  renderSessionsList('earn-sessions', sorted, true);
-}
-
-function changeMonth(dir) {
-  state.selectedMonth += dir;
-  if (state.selectedMonth > 11) { state.selectedMonth = 0; state.selectedYear++; }
-  if (state.selectedMonth < 0) { state.selectedMonth = 11; state.selectedYear--; }
-  renderAll();
-}
-
-// --- Overlap Timeline ---
-function buildOverlapTimeline() {
-  const container = document.getElementById('overlap-timeline');
-
-  // Your working hours in WIB (UTC+7): 9AM-5PM = hours 9-17
-  // US ET working hours in ET: 9AM-5PM
-  // ET is UTC-5 (or UTC-4 DST)
-  // 9AM ET = 9PM WIB (same day)
-  // 5PM ET = 5AM WIB (next day)
-  // So in WIB: US ET works ~9PM-5AM (across midnight)
-
-  // Show 24h timeline in WIB
-  const hours = Array.from({ length: 24 }, (_, i) => i);
-
-  // Your hours: 9-17 WIB
-  const yourStart = 9, yourEnd = 17;
-
-  // US ET in WIB: roughly 9PM-5AM (21-5, wrapping midnight)
-  // We'll show ET as the primary
-  const usStartWIB = 21, usEndWIB = 5; // wraps midnight
-
-  function isYourHour(h) { return h >= yourStart && h < yourEnd; }
-  function isUsHour(h) {
-    if (usStartWIB < usEndWIB) return h >= usStartWIB && h < usEndWIB;
-    return h >= usStartWIB || h < usEndWIB;
+function changeMonth(delta) {
+  state.selectedMonth += delta;
+  if (state.selectedMonth > 11) {
+    state.selectedMonth = 0;
+    state.selectedYear++;
+  } else if (state.selectedMonth < 0) {
+    state.selectedMonth = 11;
+    state.selectedYear--;
   }
-
-  // Hours row
-  const hoursHtml = `
-    <div class="timeline-row">
-      <div class="timeline-label">Hour</div>
-      <div class="timeline-bar">
-        ${hours.map(h => `<div class="timeline-cell inactive"><span class="hour-label">${h}</span></div>`).join('')}
-      </div>
-    </div>
-  `;
-
-  // Your hours row
-  const yoursHtml = `
-    <div class="timeline-row">
-      <div class="timeline-label">You</div>
-      <div class="timeline-bar">
-        ${hours.map(h => `<div class="timeline-cell ${isYourHour(h) ? 'active-yours' : 'inactive'}"></div>`).join('')}
-      </div>
-    </div>
-  `;
-
-  // US hours row
-  const usHtml = `
-    <div class="timeline-row">
-      <div class="timeline-label">US (ET)</div>
-      <div class="timeline-bar">
-        ${hours.map(h => `<div class="timeline-cell ${isUsHour(h) ? 'active-theirs' : 'inactive'}"></div>`).join('')}
-      </div>
-    </div>
-  `;
-
-  // Overlap row
-  const overlapHtml = `
-    <div class="timeline-row">
-      <div class="timeline-label">Overlap</div>
-      <div class="timeline-bar">
-        ${hours.map(h => `<div class="timeline-cell ${isYourHour(h) && isUsHour(h) ? 'active-overlap' : 'inactive'}"></div>`).join('')}
-      </div>
-    </div>
-  `;
-
-  container.innerHTML = hoursHtml + yoursHtml + usHtml + overlapHtml;
-}
-
-// --- Meeting Planner ---
-function updateMeetingTime() {
-  const timeInput = document.getElementById('meeting-time').value;
-  if (!timeInput) return;
-
-  const [hours, minutes] = timeInput.split(':').map(Number);
-  const now = new Date();
-  const jakartaDate = new Date(now);
-  jakartaDate.setHours(hours, minutes, 0, 0);
-
-  const container = document.getElementById('meeting-results');
-  const usTzs = TIMEZONES.filter(tz => tz.id !== 'jakarta');
-
-  container.innerHTML = usTzs.map(tz => {
-    const timeStr = jakartaDate.toLocaleTimeString('en-US', {
-      timeZone: tz.tz,
-      hour: '2-digit',
-      minute: '2-digit',
-      hour12: true,
-    });
-
-    const usHour = parseInt(jakartaDate.toLocaleTimeString('en-US', {
-      timeZone: tz.tz,
-      hour: '2-digit',
-      hour12: false,
-    }));
-
-    let status, statusColor;
-    if (usHour >= 9 && usHour < 17) {
-      status = '✅ Working hours';
-      statusColor = 'var(--success)';
-    } else if (usHour >= 7 && usHour < 9 || usHour >= 17 && usHour < 20) {
-      status = '⚠️ Maybe available';
-      statusColor = 'var(--warning)';
-    } else {
-      status = '😴 Off hours';
-      statusColor = 'var(--danger)';
-    }
-
-    return `
-      <div class="meeting-result-row">
-        <span class="meeting-result-city">${tz.flag} ${tz.city}</span>
-        <span class="meeting-result-time">${timeStr}</span>
-        <span class="meeting-result-status" style="color:${statusColor}">${status}</span>
-      </div>
-    `;
-  }).join('');
+  renderAll();
 }
 
 // --- Utilities ---
@@ -696,8 +920,8 @@ function todayStr() {
   return `${d.getFullYear()}-${(d.getMonth()+1).toString().padStart(2,'0')}-${d.getDate().toString().padStart(2,'0')}`;
 }
 
-function timeToMinutes(timeStr) {
-  const [h, m] = timeStr.split(':').map(Number);
+function timeToMinutes(str) {
+  const [h, m] = str.split(':').map(Number);
   return h * 60 + m;
 }
 
@@ -709,11 +933,11 @@ function formatDuration(mins) {
 }
 
 function formatIDR(amount) {
-  return 'Rp ' + Math.round(amount).toLocaleString('id-ID');
+  return 'Rp ' + Math.round(amount || 0).toLocaleString('id-ID');
 }
 
 function formatUSD(amount) {
-  return '$' + amount.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  return '$' + (amount || 0).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
 }
 
 function formatDate(dateStr) {
@@ -721,22 +945,28 @@ function formatDate(dateStr) {
   return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 }
 
+function setText(id, text) {
+  const el = document.getElementById(id);
+  if (el) el.textContent = text;
+}
+
 function escapeHtml(str) {
-  const div = document.createElement('div');
-  div.textContent = str;
-  return div.innerHTML;
+  const d = document.createElement('div');
+  d.textContent = str;
+  return d.innerHTML;
 }
 
 function showToast(msg) {
   const toast = document.getElementById('toast');
+  if (!toast) return;
   toast.textContent = msg;
   toast.classList.remove('hidden');
   toast.classList.add('show');
   setTimeout(() => {
     toast.classList.remove('show');
-    setTimeout(() => toast.classList.add('hidden'), 300);
-  }, 2500);
+    setTimeout(() => toast.classList.add('hidden'), 250);
+  }, 2200);
 }
 
-// --- Start ---
+// Boot
 document.addEventListener('DOMContentLoaded', init);
