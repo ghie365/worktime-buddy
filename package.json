@@ -1,7 +1,7 @@
 {
   "name": "worktime-buddy",
-  "version": "1.1.0",
-  "versionCode": 2,
+  "version": "1.1.1",
+  "versionCode": 3,
   "description": "Dual-job time & income tracker with timezone buddy — PWA & Android App",
   "main": "app.js",
   "scripts": {

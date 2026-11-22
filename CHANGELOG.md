@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.1.1] - 2026-11-22
+
+### Fixed
+- Fixed rate formatting in Earnings tab: removed erroneous `/hr` suffix when a job is configured with a Monthly Salary in USD or IDR.
+
+---
+
 ## [1.1.0] - 2026-11-22
 
 ### Added

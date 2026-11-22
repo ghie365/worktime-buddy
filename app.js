@@ -855,14 +855,14 @@ function renderEarningsTab(settings, j1Earned, j2Earned, j1Mins, j2Mins, totalID
   // Job 1
   setText('earn-job1-type-badge', settings.job1.type.toUpperCase());
   setText('earn-job1-rate-label', settings.job1.type === 'monthly' ? 'Monthly Salary' : 'Hourly Rate');
-  setText('earn-job1-rate-val', settings.job1.currency === 'USD' ? `$${settings.job1.rate}/hr` : formatIDR(settings.job1.rate));
+  setText('earn-job1-rate-val', formatRateDisplay(settings.job1.rate, settings.job1.currency, settings.job1.type));
   setText('earn-job1-hours', formatDuration(j1Mins));
   setText('earn-job1-total', settings.job1.currency === 'USD' ? formatUSD(j1Earned) : formatIDR(j1Earned));
 
   // Job 2
   setText('earn-job2-type-badge', settings.job2.type.toUpperCase());
   setText('earn-job2-rate-label', settings.job2.type === 'monthly' ? 'Monthly Salary' : 'Hourly Rate');
-  setText('earn-job2-rate-val', settings.job2.currency === 'USD' ? `$${settings.job2.rate}/hr` : formatIDR(settings.job2.rate));
+  setText('earn-job2-rate-val', formatRateDisplay(settings.job2.rate, settings.job2.currency, settings.job2.type));
   setText('earn-job2-hours', formatDuration(j2Mins));
   setText('earn-job2-primary-total', settings.job2.currency === 'USD' ? formatUSD(j2Earned) : formatIDR(j2Earned));
   setText('earn-job2-idr', formatIDR(settings.job2.currency === 'USD' ? j2Earned * settings.exchangeRate : j2Earned));
@@ -938,6 +938,17 @@ function formatIDR(amount) {
 
 function formatUSD(amount) {
   return '$' + (amount || 0).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+}
+
+function formatRateDisplay(rate, currency, type) {
+  const isHourly = type === 'hourly';
+  const suffix = isHourly ? '/hr' : '';
+  const num = Number(rate) || 0;
+  if (currency === 'USD') {
+    return isHourly ? `$${num.toFixed(2)}${suffix}` : `$${num.toLocaleString('en-US')}`;
+  } else {
+    return `${formatIDR(num)}${suffix}`;
+  }
 }
 
 function formatDate(dateStr) {
