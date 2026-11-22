@@ -1,0 +1,384 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <meta name="theme-color" content="#0f0f1a">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <title>WorkTime Buddy</title>
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⏱️</text></svg>">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div id="app">
+    <!-- Header -->
+    <header id="header">
+      <h1>⏱️ WorkTime Buddy</h1>
+      <div id="header-tz" class="header-timezone"></div>
+    </header>
+
+    <!-- Pages -->
+    <main id="main">
+
+      <!-- Dashboard -->
+      <section id="page-dashboard" class="page active">
+        <div class="page-scroll">
+          <!-- Timezone Quick Strip -->
+          <div class="tz-strip">
+            <div class="tz-strip-item" id="tz-local">
+              <span class="tz-flag">🇮🇩</span>
+              <span class="tz-label">Jakarta</span>
+              <span class="tz-time" id="tz-local-time">--:--</span>
+            </div>
+            <div class="tz-strip-divider">⇄</div>
+            <div class="tz-strip-item" id="tz-us">
+              <span class="tz-flag">🇺🇸</span>
+              <span class="tz-label" id="tz-us-label">US East</span>
+              <span class="tz-time" id="tz-us-time">--:--</span>
+            </div>
+          </div>
+
+          <!-- Overlap Indicator -->
+          <div class="overlap-card" id="overlap-card">
+            <div class="overlap-icon" id="overlap-icon">🟢</div>
+            <div class="overlap-text" id="overlap-text">Both awake — good time to sync!</div>
+          </div>
+
+          <!-- Today Summary -->
+          <h2 class="section-title">Today's Work</h2>
+          <div class="summary-cards">
+            <div class="summary-card job1">
+              <div class="summary-card-header">
+                <span class="job-dot job1-dot"></span>
+                <span>Sr. Sysadmin</span>
+              </div>
+              <div class="summary-hours" id="dash-job1-hours">0h 0m</div>
+              <button class="quick-start-btn" onclick="quickStart('sysadmin')">
+                <span id="dash-job1-btn-icon">▶</span> <span id="dash-job1-btn-text">Start</span>
+              </button>
+            </div>
+            <div class="summary-card job2">
+              <div class="summary-card-header">
+                <span class="job-dot job2-dot"></span>
+                <span>L3 Engineer</span>
+              </div>
+              <div class="summary-hours" id="dash-job2-hours">0h 0m</div>
+              <button class="quick-start-btn" onclick="quickStart('l3engineer')">
+                <span id="dash-job2-btn-icon">▶</span> <span id="dash-job2-btn-text">Start</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- This Month Earnings -->
+          <h2 class="section-title">This Month</h2>
+          <div class="earnings-preview">
+            <div class="earnings-preview-row">
+              <span>Sr. Sysadmin</span>
+              <span id="dash-job1-earning">Rp 0</span>
+            </div>
+            <div class="earnings-preview-row">
+              <span>L3 Engineer</span>
+              <span id="dash-job2-earning">$0.00</span>
+            </div>
+            <div class="earnings-preview-total">
+              <span>Total (IDR)</span>
+              <span id="dash-total-earning">Rp 0</span>
+            </div>
+          </div>
+
+          <!-- Recent Sessions -->
+          <h2 class="section-title">Recent Sessions</h2>
+          <div id="dash-recent-sessions" class="sessions-list">
+            <div class="empty-state">No sessions yet — start tracking!</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Timer -->
+      <section id="page-timer" class="page">
+        <div class="page-scroll">
+          <!-- Job Selector -->
+          <div class="job-toggle">
+            <button class="job-toggle-btn active" id="toggle-sysadmin" onclick="selectJob('sysadmin')">
+              <span class="job-dot job1-dot"></span> Sr. Sysadmin
+            </button>
+            <button class="job-toggle-btn" id="toggle-l3engineer" onclick="selectJob('l3engineer')">
+              <span class="job-dot job2-dot"></span> L3 Engineer
+            </button>
+          </div>
+
+          <!-- Timer Display -->
+          <div class="timer-display" id="timer-display">
+            <div class="timer-time" id="timer-time">00:00:00</div>
+            <div class="timer-job" id="timer-job">Sr. Sysadmin</div>
+            <div class="timer-started" id="timer-started"></div>
+          </div>
+
+          <!-- Timer Controls -->
+          <div class="timer-controls">
+            <button class="timer-btn start" id="btn-start" onclick="startTimer()">
+              <span>▶</span> Start
+            </button>
+            <button class="timer-btn pause hidden" id="btn-pause" onclick="pauseTimer()">
+              <span>⏸</span> Pause
+            </button>
+            <button class="timer-btn resume hidden" id="btn-resume" onclick="resumeTimer()">
+              <span>▶</span> Resume
+            </button>
+            <button class="timer-btn stop hidden" id="btn-stop" onclick="stopTimer()">
+              <span>⏹</span> Stop
+            </button>
+          </div>
+
+          <!-- Manual Entry -->
+          <button class="manual-entry-btn" onclick="toggleManualEntry()">
+            ＋ Manual Entry
+          </button>
+          <div class="manual-entry hidden" id="manual-entry">
+            <div class="form-group">
+              <label>Job</label>
+              <select id="manual-job">
+                <option value="sysadmin">Sr. Sysadmin</option>
+                <option value="l3engineer">L3 Engineer</option>
+              </select>
+            </div>
+            <div class="form-row">
+              <div class="form-group">
+                <label>Date</label>
+                <input type="date" id="manual-date">
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-group">
+                <label>Start</label>
+                <input type="time" id="manual-start">
+              </div>
+              <div class="form-group">
+                <label>End</label>
+                <input type="time" id="manual-end">
+              </div>
+            </div>
+            <div class="form-group">
+              <label>Note (optional)</label>
+              <input type="text" id="manual-note" placeholder="What did you work on?">
+            </div>
+            <button class="save-btn" onclick="saveManualEntry()">Save Session</button>
+          </div>
+
+          <!-- Today's Sessions -->
+          <h2 class="section-title">Today's Sessions</h2>
+          <div id="timer-sessions" class="sessions-list">
+            <div class="empty-state">No sessions today</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Earnings -->
+      <section id="page-earnings" class="page">
+        <div class="page-scroll">
+          <!-- Month Selector -->
+          <div class="month-selector">
+            <button onclick="changeMonth(-1)">◀</button>
+            <span id="earnings-month">November 2026</span>
+            <button onclick="changeMonth(1)">▶</button>
+          </div>
+
+          <!-- Total Card -->
+          <div class="total-card">
+            <div class="total-label">Total Earnings</div>
+            <div class="total-amount" id="total-idr">Rp 0</div>
+            <div class="total-sub" id="total-usd">≈ $0.00 USD</div>
+          </div>
+
+          <!-- Job Breakdown -->
+          <div class="breakdown">
+            <div class="breakdown-item job1-border">
+              <div class="breakdown-header">
+                <span class="job-dot job1-dot"></span>
+                <span class="breakdown-title">Sr. Sysadmin</span>
+                <span class="breakdown-type">Monthly Salary</span>
+              </div>
+              <div class="breakdown-details">
+                <div class="breakdown-row">
+                  <span>Monthly Salary</span>
+                  <span id="earn-job1-salary">Rp 0</span>
+                </div>
+                <div class="breakdown-row">
+                  <span>Hours Tracked</span>
+                  <span id="earn-job1-hours">0h</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="breakdown-item job2-border">
+              <div class="breakdown-header">
+                <span class="job-dot job2-dot"></span>
+                <span class="breakdown-title">L3 Engineer</span>
+                <span class="breakdown-type">Hourly Rate</span>
+              </div>
+              <div class="breakdown-details">
+                <div class="breakdown-row">
+                  <span>Hours Worked</span>
+                  <span id="earn-job2-hours">0h</span>
+                </div>
+                <div class="breakdown-row">
+                  <span>Rate</span>
+                  <span id="earn-job2-rate">$0/hr</span>
+                </div>
+                <div class="breakdown-row total">
+                  <span>Earnings (USD)</span>
+                  <span id="earn-job2-usd">$0.00</span>
+                </div>
+                <div class="breakdown-row">
+                  <span>Earnings (IDR)</span>
+                  <span id="earn-job2-idr">Rp 0</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Settings -->
+          <h2 class="section-title">Job Settings</h2>
+          <div class="settings-card">
+            <div class="form-group">
+              <label>Sysadmin Monthly Salary (IDR)</label>
+              <input type="number" id="set-salary" placeholder="e.g. 15000000" onchange="saveSettings()">
+            </div>
+            <div class="form-group">
+              <label>L3 Engineer Hourly Rate (USD)</label>
+              <input type="number" id="set-rate" placeholder="e.g. 45" step="0.5" onchange="saveSettings()">
+            </div>
+            <div class="form-group">
+              <label>USD → IDR Exchange Rate</label>
+              <input type="number" id="set-exchange" placeholder="e.g. 15800" onchange="saveSettings()">
+            </div>
+          </div>
+
+          <!-- History -->
+          <h2 class="section-title">Monthly Sessions</h2>
+          <div id="earn-sessions" class="sessions-list">
+            <div class="empty-state">No sessions this month</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Timezones -->
+      <section id="page-timezones" class="page">
+        <div class="page-scroll">
+          <!-- Clocks -->
+          <div class="clocks-grid">
+            <div class="clock-card local">
+              <div class="clock-flag">🇮🇩</div>
+              <div class="clock-city">Jakarta (WIB)</div>
+              <div class="clock-time" id="clock-jakarta">--:--:--</div>
+              <div class="clock-date" id="clock-jakarta-date">---</div>
+            </div>
+            <div class="clock-card">
+              <div class="clock-flag">🇺🇸</div>
+              <div class="clock-city">New York (ET)</div>
+              <div class="clock-time" id="clock-newyork">--:--:--</div>
+              <div class="clock-date" id="clock-newyork-date">---</div>
+              <div class="clock-diff" id="clock-newyork-diff"></div>
+            </div>
+            <div class="clock-card">
+              <div class="clock-flag">🇺🇸</div>
+              <div class="clock-city">Chicago (CT)</div>
+              <div class="clock-time" id="clock-chicago">--:--:--</div>
+              <div class="clock-date" id="clock-chicago-date">---</div>
+              <div class="clock-diff" id="clock-chicago-diff"></div>
+            </div>
+            <div class="clock-card">
+              <div class="clock-flag">🇺🇸</div>
+              <div class="clock-city">Denver (MT)</div>
+              <div class="clock-time" id="clock-denver">--:--:--</div>
+              <div class="clock-date" id="clock-denver-date">---</div>
+              <div class="clock-diff" id="clock-denver-diff"></div>
+            </div>
+            <div class="clock-card">
+              <div class="clock-flag">🇺🇸</div>
+              <div class="clock-city">Los Angeles (PT)</div>
+              <div class="clock-time" id="clock-la">--:--:--</div>
+              <div class="clock-date" id="clock-la-date">---</div>
+              <div class="clock-diff" id="clock-la-diff"></div>
+            </div>
+          </div>
+
+          <!-- Overlap Timeline -->
+          <h2 class="section-title">Working Hours Overlap</h2>
+          <p class="section-subtitle">Your 9AM–5PM vs US working hours</p>
+          <div class="overlap-timeline" id="overlap-timeline"></div>
+          <div class="overlap-legend">
+            <span><span class="legend-dot yours"></span> Your hours (WIB)</span>
+            <span><span class="legend-dot theirs"></span> US hours</span>
+            <span><span class="legend-dot overlap"></span> Overlap</span>
+          </div>
+
+          <!-- Meeting Planner -->
+          <h2 class="section-title">Meeting Planner</h2>
+          <div class="meeting-planner">
+            <div class="form-group">
+              <label>Pick a time in Jakarta</label>
+              <input type="time" id="meeting-time" value="09:00" onchange="updateMeetingTime()">
+            </div>
+            <div class="meeting-results" id="meeting-results"></div>
+          </div>
+
+          <!-- US Timezone Selector for Dashboard -->
+          <h2 class="section-title">Dashboard US Timezone</h2>
+          <div class="settings-card">
+            <div class="form-group">
+              <label>Show on dashboard header</label>
+              <select id="set-primary-tz" onchange="savePrimaryTz()">
+                <option value="America/New_York">New York (ET)</option>
+                <option value="America/Chicago">Chicago (CT)</option>
+                <option value="America/Denver">Denver (MT)</option>
+                <option value="America/Los_Angeles">Los Angeles (PT)</option>
+              </select>
+            </div>
+          </div>
+        </div>
+      </section>
+
+    </main>
+
+    <!-- Bottom Navigation -->
+    <nav id="bottom-nav">
+      <button class="nav-btn active" onclick="switchPage('dashboard')" data-page="dashboard">
+        <span class="nav-icon">📊</span>
+        <span class="nav-label">Dashboard</span>
+      </button>
+      <button class="nav-btn" onclick="switchPage('timer')" data-page="timer">
+        <span class="nav-icon">⏱️</span>
+        <span class="nav-label">Timer</span>
+      </button>
+      <button class="nav-btn" onclick="switchPage('earnings')" data-page="earnings">
+        <span class="nav-icon">💰</span>
+        <span class="nav-label">Earnings</span>
+      </button>
+      <button class="nav-btn" onclick="switchPage('timezones')" data-page="timezones">
+        <span class="nav-icon">🌏</span>
+        <span class="nav-label">Timezones</span>
+      </button>
+    </nav>
+  </div>
+
+  <!-- Toast -->
+  <div id="toast" class="toast hidden"></div>
+
+  <!-- Delete Confirmation Modal -->
+  <div id="modal-overlay" class="modal-overlay hidden" onclick="closeModal()">
+    <div class="modal" onclick="event.stopPropagation()">
+      <div class="modal-title" id="modal-title">Delete Session?</div>
+      <div class="modal-text" id="modal-text">This action cannot be undone.</div>
+      <div class="modal-actions">
+        <button class="modal-btn cancel" onclick="closeModal()">Cancel</button>
+        <button class="modal-btn confirm" id="modal-confirm" onclick="confirmDelete()">Delete</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
