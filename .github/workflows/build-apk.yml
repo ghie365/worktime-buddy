@@ -3,12 +3,15 @@ name: Build Android APK
 on:
   push:
     branches: [ "main" ]
+    tags: [ "v*" ]
   workflow_dispatch:
 
 jobs:
   build:
-    name: Build APK
+    name: Build & Version APK
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
 
     steps:
       - name: Checkout Repository
@@ -31,19 +34,46 @@ jobs:
       - name: Build Web Assets
         run: npm run build
 
-      - name: Initialize Capacitor Android Platform
+      - name: Initialize Capacitor Android Platform & Sync Version
         run: |
           npx cap add android
           npx cap sync android
           chmod +x android/gradlew
+          
+          # Read version and versionCode from package.json
+          APP_VERSION=$(node -p "require('./package.json').version")
+          APP_BUILD=$(node -p "require('./package.json').versionCode || 2")
+          echo "Packaging WorkTime Buddy v${APP_VERSION} (Build ${APP_BUILD})"
+          
+          # Inject versionCode and versionName into android/app/build.gradle
+          sed -i "s/versionCode 1/versionCode ${APP_BUILD}/g" android/app/build.gradle
+          sed -i "s/versionName \"1.0\"/versionName \"${APP_VERSION}\"/g" android/app/build.gradle
 
       - name: Build Debug APK with Gradle
         working-directory: android
         run: ./gradlew assembleDebug --stacktrace
 
-      - name: Upload APK Artifact
+      - name: Prepare Versioned APK Package
+        id: package_apk
+        run: |
+          APP_VERSION=$(node -p "require('./package.json').version")
+          mkdir -p dist-apk
+          cp android/app/build/outputs/apk/debug/app-debug.apk "dist-apk/WorkTime-Buddy-v${APP_VERSION}.apk"
+          echo "version=${APP_VERSION}" >> $GITHUB_OUTPUT
+
+      - name: Upload APK as Workflow Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: WorkTime-Buddy-Debug-APK
-          path: android/app/build/outputs/apk/debug/app-debug.apk
-          retention-days: 14
+          name: WorkTime-Buddy-v${{ steps.package_apk.outputs.version }}-APK
+          path: dist-apk/*.apk
+          retention-days: 30
+
+      - name: Publish GitHub Release (if tagged)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist-apk/*.apk
+          name: WorkTime Buddy v${{ steps.package_apk.outputs.version }}
+          body_path: CHANGELOG.md
+          draft: false
+          prerelease: false

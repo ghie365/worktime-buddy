@@ -965,6 +965,32 @@ main {
   gap: 8px;
 }
 
+/* App Version Footer */
+.app-version-card {
+  text-align: center;
+  padding: 24px 16px 12px;
+  color: var(--text-muted);
+}
+
+.app-version-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-dim);
+  margin-bottom: 2px;
+}
+
+.app-version-number {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--job1);
+  margin-bottom: 2px;
+}
+
+.app-version-sub {
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
 .action-outline-btn {
   width: 100%;
   padding: 11px;
